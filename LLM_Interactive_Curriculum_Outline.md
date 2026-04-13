@@ -59,6 +59,19 @@ PART VIII: AGENTS & EVAL
 
 ---
 
+## Module 0 — Cold Open: A Working Transformer in 5 Minutes
+
+*(Per readability-review recommendation: show the thing working before dismantling it.)*
+
+| | |
+|---|---|
+| **Core idea** | Before you learn *how* LLMs work, watch one work. Load a 124M GPT-2 or a 1.5B Qwen in three lines, generate a short story, look at the attention heatmap, look at the token probabilities, then close the notebook. That's the machine. The next 33 modules are us taking it apart screw by screw. |
+| **Interactive demo** | Three cells: (1) `from transformers import pipeline; pipe = pipeline("text-generation", model="gpt2")` and generate 50 tokens. (2) Same model, get the hidden state of the last layer, plot its attention heatmap on the prompt — "look, token 7 is attending to token 2, we'll find out why in Module 5." (3) Dump the top-5 next-token probabilities at each position and plot the distribution shrinking as context grows. |
+| **Surprise moment** | "Wait, the whole thing is 350 MB and fits on my laptop?" — followed by "...and the big ones are just this, scaled." |
+| **Point** | You now have a mental image of the *object* we're studying. Nothing in Part I through Part VIII is going to feel as abstract again. |
+
+---
+
 ## PART I — Foundations
 
 ### Module 1: Text → Numbers (Tokenization)
@@ -96,6 +109,19 @@ PART VIII: AGENTS & EVAL
 | **Key math** | Encoder: `z = f(x)`, Decoder: `x̂ = g(z)`, Loss: `‖x − x̂‖²`. Variational: add `KL(q(z|x) ‖ p(z))`. |
 | **Interactive demo** | Train a tiny autoencoder on MNIST digits. Slide through the latent space and watch digits morph. |
 | **Surprise moment** | The "bottleneck" concept is *everywhere* in ML — this is the mental model for understanding why transformers compress so well. |
+
+---
+
+### Module 4.5: Why Attention? — The Feed-Forward Wall
+
+*(Per readability review: bridges the gap from Part I's friendly autoencoder to Part II's Q/K/V matrix derivations. Without this, non-ML learners fall off the cliff.)*
+
+| | |
+|---|---|
+| **Core idea** | Let's try to solve a sequence task with the tools we already have — an MLP — and watch it fail. Then we'll know what we're asking attention to fix. |
+| **Interactive demo** | Task: *copy the 3rd token of a sequence to the end*. Trivially learnable if you know which token to look at. Build a 2-layer MLP that takes a bag of tokens as input and tries to predict the output. Watch it plateau. Try a fixed-position MLP that takes `[x₁, x₂, x₃, x₄, x₅]` as a concatenated vector — it works for length 5, breaks for length 6. Try averaging the embeddings — it loses the 3rd-token identity entirely. |
+| **The punchline** | Every tool we have is either *position-blind* (bag of embeddings) or *position-rigid* (fixed-size concatenation). We need something that can dynamically look at *different* tokens depending on what it's doing. That thing is attention. |
+| **Surprise moment** | The MLP-concat approach fails for the *copy-the-3rd-token* task the moment sequence length changes. Attention solves it in 5 lines. |
 
 ---
 
@@ -149,7 +175,7 @@ PART VIII: AGENTS & EVAL
 | | |
 |---|---|
 | **Core idea** | Attention + Feed-Forward + Residual Connections + Layer Norm = one block. Stack N of these. |
-| **Key math** | Pre-norm: `x = x + MultiHead(LN(x))` then `x = x + FFN(LN(x))` where `FFN(x) = W₂ · SwiGLU(W₁x) + b₂`. Modern LLMs use SwiGLU/GELU, not ReLU. |
+| **Key math** | Pre-norm: `x = x + MultiHead(LN(x))` then `x = x + FFN(LN(x))`. FFN with SwiGLU is a *gated* linear unit: `FFN(x) = W₃ · (SiLU(W₁x) ⊙ W₂x)`, where `SiLU(z) = z · σ(z)` and `⊙` is elementwise product. The gate `SiLU(W₁x)` decides *how much* of each channel of `W₂x` to let through before the output projection `W₃`. Modern LLMs use SwiGLU (Llama, Mistral, Qwen) or GELU (GPT-2/3), not plain ReLU. |
 | **Residual stream view** | The residual connection means each layer *adds* to a running sum. Information flows through the "residual stream" and each layer contributes a delta. This is key to interpretability. |
 | **Interactive demo** | Build a transformer block from scratch in PyTorch (~50 lines). Inspect tensor shapes at every stage. Remove residual connections → training collapses. |
 | **Surprise moment** | Residual connections are the most important part — without them, deep transformers can't train. Visualize gradient norms with/without residuals. |
@@ -159,7 +185,7 @@ PART VIII: AGENTS & EVAL
 | | |
 |---|---|
 | **Core idea** | Attention is permutation-invariant. Without positional info, "dog bites man" = "man bites dog". |
-| **Key math** | **Sinusoidal:** `PE(pos, 2i) = sin(pos / 10000^(2i/d))`. **RoPE:** rotation matrix `R(θ·pos)` applied to Q and K so `q·k` depends on relative position. **ALiBi:** linear bias `−m|i−j|` added to attention logits. |
+| **Key math** | **Sinusoidal (Vaswani et al.):** interleaved `sin`/`cos` per even/odd dimension — `PE(pos, 2i) = sin(pos / 10000^(2i/d))` and `PE(pos, 2i+1) = cos(pos / 10000^(2i/d))`. The `cos` companion is what makes each position a unique *rotated* pair, not just a scaled sine. **RoPE:** a rotation matrix `R(θ·pos)` applied to `Q` and `K` so that `q·k` depends only on *relative* position: `R(θm)q · R(θn)k = q · R(θ(n−m))k`. **ALiBi:** additive linear bias `−m_h · |i−j|` on attention logits, with a per-head slope `m_h`. **Long-context extension (2024-2026):** **YaRN** rescales RoPE frequencies to extend context beyond training length; **LongRoPE / LongRoPE2** pushes Llama-class models to 2M tokens by search over per-frequency scale factors. Covered as a mini-module 10b. |
 | **Interactive demo** | Visualize sinusoidal encodings as a heatmap. Compare with RoPE and ALiBi. Show how RoPE enables length extrapolation while sinusoidal breaks. |
 | **Surprise moment** | RoPE encodes *relative* distance via rotation: `Rθm q · Rθn k = q · Rθ(n-m) k`. Elegant. |
 
@@ -171,7 +197,20 @@ PART VIII: AGENTS & EVAL
 | **Key comparison** | **Encoder-only (BERT):** bidirectional, MLM. Best for classification/embeddings. **Decoder-only (GPT):** causal, next-token. Best for generation. **Encoder-decoder (T5):** cross-attention bridge. Best for translation/summarization. |
 | **Key math** | Cross-attention: `Attention(Q_dec, K_enc, V_enc)` — decoder queries attend to encoder outputs. |
 | **Interactive demo** | Same text processed by BERT vs GPT-2 vs T5. Show the different masking patterns and attention flows. |
-| **Surprise moment** | Decoder-only won the scaling race because next-token prediction is a *simpler objective* that scales more predictably (Chinchilla scaling laws). |
+| **Surprise moment** | Decoder-only won the scaling race for two reasons that are *not* Chinchilla: (1) next-token prediction on all tokens gives a denser training signal per step than span-corruption, and (2) in-context learning emerges naturally from the autoregressive objective, making zero/few-shot use trivial at inference. Chinchilla is about *how to allocate compute between params and tokens* — it applies to all three families equally. |
+
+### Module 11.5: Beyond Transformers — SSMs, Hybrids, and Diffusion LMs
+
+*(Per novelness review: the 2025-2026 landscape is no longer transformer-only. Cover the main alternatives before declaring decoder-only victorious.)*
+
+| | |
+|---|---|
+| **Core idea** | Transformers are not the only sequence model that scales. Three families now compete at or near the frontier, each trading some of attention's properties for something else. |
+| **State Space Models (Mamba, Mamba-3)** | Selective SSM replaces attention with a *linear-time recurrent scan*: `h_t = A(x_t) h_{t-1} + B(x_t) x_t`, `y_t = C(x_t) h_t`, where `A/B/C` are *input-dependent* (this is the "selective" part). Cost: `O(n)` instead of `O(n²)`, with a hardware-aware scan kernel. Mamba-3 (ICLR 2026) hits transformer-level quality at 2-4× throughput on long context. |
+| **Hybrid Transformer-SSM (Jamba, Zamba2)** | Interleave transformer blocks with Mamba blocks. Jamba 1.5 Large is a 398B-param hybrid with 256K context and ~3× Llama-3 throughput on long sequences. The transformer layers preserve in-context learning; the SSM layers carry the long-range compression. |
+| **Diffusion Language Models (LLaDA, Mercury)** | Instead of autoregressive next-token prediction, mask a fraction of tokens and train the model to *denoise* the whole sequence in parallel. LLaDA 8B matches Llama-3 8B on most benchmarks with vastly faster generation (all tokens at once). Mercury hits 1109 tok/s — an order of magnitude faster than autoregressive peers. |
+| **Interactive demo** | Run the same 2K-token generation task with: (a) Llama-3 8B, (b) Mamba-3 1.5B, (c) a tiny diffusion LM. Measure wall-clock and quality. Plot the trade-off cube: accuracy vs throughput vs memory. |
+| **Surprise moment** | The "transformer vs everything else" debate is already over at long context: hybrids win. The debate at short context is still open. |
 
 ### Module 12: Putting It All Together — Full Architecture Walkthrough
 
@@ -239,7 +278,7 @@ This module covers the *algorithmic* techniques for reducing KV cache cost. (Mod
 | **Key math** | Router: `G(x) = TopK(softmax(Wg · x))`. Expert output: `y = Σᵢ G(x)ᵢ · Eᵢ(x)`. Load-balancing loss: `L_bal = α · n_experts · Σᵢ fᵢ · pᵢ`. |
 | **Modern variants** | **DeepSeek-V3:** shared experts (always active) + routed experts. **Llama-4 Maverick:** alternates MoE and dense blocks every other layer. **CMoE (Carved MoE):** carves MoE from pretrained dense models without full retraining. **KIMI K2.5:** 1T total params, 32B active per token. |
 | **Interactive demo** | Build a toy MoE with 8 experts, top-2 routing. Remove load-balancing → watch "expert collapse." Visualize expert specialization. |
-| **Surprise moment** | 60%+ of open-source frontier models released in 2025-2026 use MoE. It's no longer exotic — it's the baseline. |
+| **Surprise moment** | A majority of recent open-weights *frontier-class* releases use MoE (Mixtral, DeepSeek-V2/V3, Qwen2.5-MoE, Llama-4 Maverick/Scout, KIMI K2.5, Grok-2 MoE). It's no longer exotic — at the frontier it's the baseline. Dense models still dominate the sub-10B tier where parameter efficiency matters more than parameter count. |
 
 ### Module 16: Quantization — From GPTQ to TurboQuant to RotorQuant
 
@@ -284,6 +323,20 @@ This module covers the *algorithmic* techniques for reducing KV cache cost. (Mod
 
 ---
 
+### Module 17.5: Synthetic Data — Teaching Models with Models
+
+*(Per novelness review: synthetic data was the single largest training lever of 2025-2026 and deserves mainline status, not bonus.)*
+
+| | |
+|---|---|
+| **Core idea** | The Common Crawl is running out. The frontier runs on synthetic data generated by other models: Phi-4-Reasoning, DeepSeek-R1 self-distillation, Nemotron-4 340B's synthetic suite. The recipe: strong model generates, weak model filters, humans validate samples, repeat. |
+| **Key techniques** | **Rejection sampling** (generate N, keep only passing ones). **Self-play / self-refinement** (model critiques and rewrites its own outputs). **Distillation** (train a small model on a big model's outputs). **Persona-driven generation** (force diversity by conditioning on synthetic personas). **Magpie** (prompt the instruct model with only the chat template and harvest the continuation). |
+| **Key result (EMNLP 2025)** | Mixing 1/3 synthetic + 2/3 web data yields **5-10× training speedup** at equal quality vs pure web. The synthetic fraction is doing most of the work on reasoning benchmarks. |
+| **Interactive demo** | Generate 1000 math problems with a teacher model. Auto-grade with a verifier (sympy or LLM-as-judge). Train a small student on the filtered set. Measure the student's AIME accuracy before and after. This is the DeepSeek-R1 recipe in miniature. |
+| **Surprise moment** | The student can *exceed* the teacher on some tasks because the filter removes the teacher's mistakes. It's not distillation — it's error-corrected distillation. |
+
+---
+
 ## PART V — Generation & Alignment
 
 ### Module 18: Next-Token Prediction — The Core Objective
@@ -302,7 +355,7 @@ This module covers the *algorithmic* techniques for reducing KV cache cost. (Mod
 | **Core idea** | How you *choose* from the distribution dramatically changes the output. |
 | **Key math** | Temperature: `P'(x) = softmax(logits / T)`. Top-k: keep top k, renormalize. Top-p (nucleus): smallest set where `Σ P ≥ p`. Min-p: keep tokens where `P(x) ≥ p_min · P(x_max)`. |
 | **Interactive demo** | Interactive sliders for T, k, p, min-p. Generate text in real-time. Show the distribution reshaping live. |
-| **Surprise moment** | T=0 (greedy) → repetitive. T=2.0 → gibberish. The sweet spot is narrow and task-dependent. |
+| **Surprise moment** | T=0 (greedy) is actually *great* for math/code/retrieval — the right answer is usually the highest-probability one. It only goes repetitive on open-ended generation, where the model falls into attractor loops. T=2.0 → gibberish. The sweet spot depends on whether you want one correct answer (low T) or diverse continuations (higher T). |
 
 ### Module 20: RLHF & DPO — The Classics
 
@@ -322,7 +375,7 @@ This module covers the *algorithmic* techniques for reducing KV cache cost. (Mod
 | **Core idea** | **GRPO** (Group Relative Policy Optimization) eliminates the value network from PPO by computing advantages *within a group of sampled outputs*. **RLVR** (RL with Verifiable Rewards) replaces human preferences with automatic verification (math correctness, code tests). Together, they enabled DeepSeek-R1's breakthrough: emergent reasoning without human-written chain-of-thought data. |
 | **GRPO math** | For each prompt, sample G outputs. Score with reward model. Advantage: `Aᵢ = (rᵢ − mean(r)) / (std(r) + ε)`. Loss: `L = E[min(Aᵢ · ratioᵢ, Aᵢ · clip(ratioᵢ, 1−δ, 1+δ))]`. No critic network needed → ~50% memory reduction vs PPO. |
 | **RLVR insight** | Instead of `r(x,y) = human preference`, use `r(x,y) = 1 if math_answer_correct else 0`. This is: (a) infinitely scalable, (b) perfectly accurate, (c) enables training beyond human-labeled data quality. |
-| **Also cover** | **DAPO (Distributed Advantage PO):** designed for long chain-of-thought. Introduces Clip-Higher, Dynamic Sampling, Overlong Reward Shaping. Qwen2.5-32B hit 50 points on AIME 2024 with DAPO. |
+| **Also cover** | **DAPO (Decoupled Clip and Dynamic sAmpling Policy Optimization, ByteDance 2025):** designed for long chain-of-thought. Introduces Clip-Higher (asymmetric PPO clipping), Dynamic Sampling (skip all-correct and all-wrong groups), Token-level policy loss, and Overlong Reward Shaping. Qwen2.5-32B hit 50 points on AIME 2024 with DAPO, beating DeepSeek-R1-Zero. |
 | **Interactive demo** | Sample 16 responses to a math problem. Score each (correct/incorrect). Compute group advantages. Update a tiny model with GRPO. Compare: DPO (needs preference pairs) vs GRPO (just needs a verifier). |
 | **Surprise moment** | DeepSeek-R1 trained with pure GRPO/RLVR (no human reasoning annotations) spontaneously learned to self-reflect and verify — the "aha moment" of 2025. |
 
@@ -334,6 +387,21 @@ This module covers the *algorithmic* techniques for reducing KV cache cost. (Mod
 | **Key math** | `P(answer | prompt) ∝ P(prompt | answer) · P(answer)`. Chain-of-thought: `P(answer | Q) = Σ P(answer | reasoning) · P(reasoning | Q)`. |
 | **Interactive demo** | Same question, different prompts. Show token-level probability shifts. Compare zero-shot vs few-shot vs CoT. |
 | **Surprise moment** | "Let's think step by step" literally reshapes the probability landscape. It's conditioning, not magic. |
+
+---
+
+### Module 22.5: Alignment Stack & Red Teaming
+
+*(Per novelness + uniqueness reviews: the curriculum implicitly defines alignment as RLHF+DPO+GRPO. That's the optimization layer. Real alignment is a stack.)*
+
+| | |
+|---|---|
+| **Core idea** | Alignment isn't a single training algorithm — it's a layered stack with distinct failure modes at each layer. This module zooms out and names them. |
+| **The five layers** | (1) **Pretraining data curation** — what the model even *can* say. (2) **SFT** — what the model *usually* says. (3) **Preference optimization** (DPO/GRPO, Module 20-21) — what it says when asked nicely. (4) **Constitutional AI / RLAIF** — using a weaker-but-aligned AI to critique outputs, replacing expensive human preference data. (5) **Inference-time guardrails** — classifiers, refusals, jailbreak detection. |
+| **Red teaming** | The counter-discipline. Adversarial prompts, multi-turn manipulation, encoding attacks (base64, leetspeak), many-shot jailbreaking (Anthropic 2024 — 256+ fake-conversation exploits work on every model). The curriculum shows how to run a structured red team with `Inspect AI` and `PyRIT` (Microsoft, 2024). |
+| **Constitutional AI primer** | Anthropic's two-stage recipe: (a) SFT on model-revised outputs guided by a written constitution, (b) RL against model-generated preferences derived from the same constitution. Eliminates human preference labels almost entirely. |
+| **Interactive demo** | Load a small model. Run 50 prompts from HarmBench. Measure refusal rate. Apply a crude jailbreak template. Measure again. Apply a guardrail classifier. Measure again. Real numbers, real dips. |
+| **Surprise moment** | Most "aligned" open-weights models break under a single encoding attack. Guardrails are not a solved problem. |
 
 ---
 
@@ -368,6 +436,20 @@ This module covers the *algorithmic* techniques for reducing KV cache cost. (Mod
 | **Key math** | Draft: `x₁...xₖ ~ q(x)`. Target: compute `p(xᵢ)` for all i in parallel. **Randomized acceptance rule (Leviathan et al. 2023):** accept `xᵢ` with probability `min(1, p(xᵢ)/q(xᵢ))`. On rejection, *resample* from the residual distribution `p'(x) ∝ max(0, p(x) − q(x))` and stop. This randomized test — not a deterministic `p ≥ q` check — is what makes the output distribution *provably identical* to sampling from `p` alone. Expected tokens per target call: `(1 − αᵏ⁺¹)/(1 − α)` for `k` draft steps and per-token acceptance rate `α`; in the `k → ∞` limit this tends to `1/(1−α)`. Typical: 2-3× speedup. |
 | **Interactive demo** | Simulate speculative decoding: show the draft model's guesses, the target model's verification, and the accept/reject decisions. Vary draft model quality and show how acceptance rate changes. |
 | **Surprise moment** | The output distribution is *mathematically identical* to running the large model alone — zero quality loss, pure speed gain. |
+| **Modern variants (2024-2026)** | **Medusa (2024):** bolt `k` extra prediction heads onto the target model itself — no separate draft model. ~2× speedup with no accuracy loss. **EAGLE-1/2/3 (2024-2025):** feature-level speculation at the last hidden state (not the token) — 3-4× speedup, now default in vLLM and TensorRT-LLM. **Lookahead Decoding:** parallel draft via Jacobi iteration, no extra model at all. |
+
+### Module 25.5: Sparse Autoencoders & Mechanistic Interpretability
+
+*(Per novelness review: arguably the most important interpretability breakthrough of the decade is entirely absent from the original outline. This module fixes that.)*
+
+| | |
+|---|---|
+| **Core idea** | Transformer activations are a *superposition*: one neuron codes for many features. A **Sparse Autoencoder (SAE)** learns a wider, *overcomplete* dictionary where each feature is a single sparse direction. Trained on the residual stream of a frozen LLM, SAEs reveal interpretable concepts like "Golden Gate Bridge," "Python code," "deception," and "refusal." |
+| **Key math** | SAE loss: `L = ‖x − W_dec · f(W_enc · x + b_enc) − b_dec‖² + λ · ‖f(W_enc · x + b_enc)‖₁`. The encoder maps a `d`-dim activation to `k`-dim features (`k ≫ d`), the L1 penalty forces sparsity, and the decoder reconstructs the original. A feature `i` "fires" on input `x` when `f_i(x) > 0`. |
+| **Key 2024 result** | **Anthropic's "Scaling Monosemanticity"** scaled SAEs to Claude-3 Sonnet and found millions of interpretable features — including *multimodal* ones (the same "Golden Gate Bridge" feature fires on the text, the image, and the French translation). Amplifying the feature makes the model obsess over the bridge. |
+| **Interactive demo** | Train a tiny SAE on GPT-2 small's residual stream (layer 8). Find the top-10 sparsest features. For each, show the top-5 inputs that maximally activate it. Find a "positive sentiment" feature. Ablate it during a generation pass and watch the output sentiment flip. |
+| **Surprise moment** | You can *steer* the model by adding a feature direction to the residual stream. No fine-tuning, no prompt engineering — just vector addition in the right basis. |
+| **Practical use** | Debugging hallucinations, finding deceptive reasoning, auditing safety-relevant features before deploying a model. This is where the field's interpretability bets are pointing in 2025-2026. |
 
 ---
 
@@ -474,7 +556,7 @@ This module covers the *algorithmic* techniques for reducing KV cache cost. (Mod
 
 | | |
 |---|---|
-| **Frameworks** | **Inspect AI (UK AISI / π-framework):** structured eval with solvers, scorers, sandboxed tool-use. **Braintrust / Langsmith:** production-grade eval + tracing for deployed apps. |
+| **Frameworks** | **Inspect AI (UK AISI):** structured eval framework with the `Dataset → Task → Solver → Scorer` pipeline, sandboxed tool-use in Docker/Kubernetes, MIT-licensed, now used by AISI and major labs. **Braintrust / Langsmith:** production-grade eval + tracing for deployed apps. |
 | **New approaches** | **LLM-as-judge:** use a strong model to grade a weaker model's outputs. **Revision distance:** how much a human must edit the output (human-centered quality metric). **Adversarial evals:** rephrased benchmarks to detect memorization. |
 
 **33c: Running Your Own Eval**
