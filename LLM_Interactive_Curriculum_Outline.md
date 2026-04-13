@@ -192,8 +192,8 @@ PART VIII: AGENTS & EVAL
 | | |
 |---|---|
 | **Core idea** | During generation, previous tokens' Keys and Values don't change. Cache them to avoid redundant computation. |
-| **Key math** | Without cache: `O(n²)` total for n tokens. With cache: `O(n)` per new token. Memory: `2 × n_layers × d_model × seq_len × bytes_per_param`. |
-| **Concrete example** | Llama-2 70B, 4K context, fp16: KV cache = `2 × 80 × 8192 × 4096 × 2 bytes ≈ 10 GB` — just for the *cache*, separate from model weights. |
+| **Key math** | Without cache: `O(n²)` total for n tokens. With cache: `O(n)` per new token. Memory (standard MHA): `2 × n_layers × n_kv_heads × d_head × seq_len × bytes_per_param`. For plain MHA, `n_kv_heads × d_head = d_model`; with GQA (Module 14b), `n_kv_heads < n_heads`. |
+| **Concrete example** | A 70B-scale model *without* GQA (Llama-1 65B, or Llama-2 70B as a thought experiment with standard MHA), 4K context, fp16: KV cache = `2 × 80 × 64 × 128 × 4096 × 2 bytes ≈ 10.7 GB` — just for the *cache*, separate from model weights. The real Llama-2 70B uses GQA with 8 KV heads, cutting this to ~1.34 GB — which is exactly why Module 14b exists. For Llama-2 7B (no GQA), the 4K cache is ~2 GB; push to 32K and you're at ~16 GB, more than the 13 GB of weights. |
 | **Interactive demo** | Generate 100 tokens with and without KV cache. Show wall-clock time, FLOPs counter, and memory growth. |
 | **Surprise moment** | KV cache is often the memory bottleneck, not model weights. This is why context length is so expensive. |
 
@@ -365,7 +365,7 @@ This module covers the *algorithmic* techniques for reducing KV cache cost. (Mod
 | | |
 |---|---|
 | **Core idea** | Use a fast small "draft" model to guess the next k tokens, then verify all k in a single forward pass of the large model. Accepted tokens are *provably identical in distribution* to the large model alone. |
-| **Key math** | Draft: `x₁...xₖ ~ q(x)`. Target: compute `p(xᵢ)` for all i in parallel. Accept xᵢ if `p(xᵢ) ≥ q(xᵢ)`, else reject and resample. Expected speedup: `1/(1−α)` where α = acceptance rate. Typical: 2-3× speedup. |
+| **Key math** | Draft: `x₁...xₖ ~ q(x)`. Target: compute `p(xᵢ)` for all i in parallel. **Randomized acceptance rule (Leviathan et al. 2023):** accept `xᵢ` with probability `min(1, p(xᵢ)/q(xᵢ))`. On rejection, *resample* from the residual distribution `p'(x) ∝ max(0, p(x) − q(x))` and stop. This randomized test — not a deterministic `p ≥ q` check — is what makes the output distribution *provably identical* to sampling from `p` alone. Expected tokens per target call: `(1 − αᵏ⁺¹)/(1 − α)` for `k` draft steps and per-token acceptance rate `α`; in the `k → ∞` limit this tends to `1/(1−α)`. Typical: 2-3× speedup. |
 | **Interactive demo** | Simulate speculative decoding: show the draft model's guesses, the target model's verification, and the accept/reject decisions. Vary draft model quality and show how acceptance rate changes. |
 | **Surprise moment** | The output distribution is *mathematically identical* to running the large model alone — zero quality loss, pure speed gain. |
 
