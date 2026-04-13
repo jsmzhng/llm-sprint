@@ -9,5 +9,9 @@ venv/
 env/
 .env
 build_*.py
+notebooks/build_*.py
+notebooks/_build_*.py
+notebooks/_augment_*.py
+notebooks/*.py
 *.egg-info/
 data/
